@@ -5,24 +5,23 @@ layout: doc.hbs
 
 # Frequently Asked Questions (FAQ)
 
-Certain questions arise more often than others when users ask for help. This 
+Certain questions arise more often than others when users ask for help. This
 document tries to list some of the common questions that frequently get asked,
-e.g. on [Stack Overflow](http://stackoverflow.com/questions/tagged/openlayers-3).
+e.g. on [Stack Overflow](http://stackoverflow.com/questions/tagged/openlayers).
 
 If you think a question (and naturally its answer) should be added here, feel
 free to ping us or to send a pull request enhancing this document.
 
 Table of contents:
 
-* [What projection is OpenLayers using?](#what-projection-is-openlayers-using)
-* [How do I change the projection of my map?](#how-do-i-change-the-projection-of-my-map)
-* [Why is my map centered on the gulf of guinea (or africa, the ocean, null-island)?](#why-is-my-map-centered-on-the-gulf-of-guinea-or-africa-the-ocean-null-island)
-* [Why is the order of a coordinate [lon,lat], and not [lat,lon]?](#why-is-the-order-of-a-coordinate-lonlat-and-not-latlon)
-* [Why aren't there any features in my source?](#why-arent-there-any-features-in-my-source)
-* [How do I force a re-render of the map?](#how-do-i-force-a-re-render-of-the-map)
-* [How do I create a custom build of OpenLayers?](#how-do-i-create-a-custom-build-of-openlayers)
-* [Do I need to write my own code using Closure library?](#do-i-need-to-write-my-own-code-using-closure-library)
-* [Do I need to compress my code with Closure compiler?](#do-i-need-to-compress-my-code-with-closure-compiler)
+* [What projection is OpenLayers using?](#what-projection-is-openlayers-using-)
+* [How do I change the projection of my map?](#how-do-i-change-the-projection-of-my-map-)
+* [Why is my map centered on the gulf of guinea (or africa, the ocean, null-island)?](#why-is-my-map-centered-on-the-gulf-of-guinea-or-africa-the-ocean-null-island-)
+* [Why is the order of a coordinate [lon,lat], and not [lat,lon]?](#why-is-the-order-of-a-coordinate-lon-lat-and-not-lat-lon-)
+* [Why aren't there any features in my source?](#why-aren-t-there-any-features-in-my-source-)
+* [How do I force a re-render of the map?](#how-do-i-force-a-re-render-of-the-map-)
+* [Why are my features not found?](#why-are-my-features-not-found-)
+
 
 ## What projection is OpenLayers using?
 
@@ -66,20 +65,19 @@ var map = new ol.Map({
 ```
 
 ```javascript
-// To use other projections, you have to register the projection in OpenLayers:
+// To use other projections, you have to register the projection in OpenLayers.
+// This can easily be done with [https://proj4js.org](proj4)
 //
 // By default OpenLayers does not know about the EPSG:21781 (Swiss) projection.
 // So we create a projection instance for EPSG:21781 and pass it to
 // ol.proj.addProjection to make it available to the library for lookup by its
 // code.
-var swissProjection = new ol.proj.Projection({
-  code: 'EPSG:21781',
-  // The extent is used to determine zoom level 0. Recommended values for a
-  // projection's validity extent can be found at http://epsg.io/.
-  extent: [485869.5728, 76443.1884, 837076.5648, 299941.7864],
-  units: 'm'
-});
-ol.proj.addProjection(swissProjection);
+proj4.defs('EPSG:21781',
+  '+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 +k_0=1 ' +
+  '+x_0=600000 +y_0=200000 +ellps=bessel ' +
+  '+towgs84=660.077,13.551,369.344,2.484,1.783,2.939,5.66 +units=m +no_defs');
+ol.proj.proj4.register(proj4);
+var swissProjection = ol.proj.get('EPSG:21781');
 
 // we can now use the projection:
 var map = new ol.Map({
@@ -92,7 +90,7 @@ var map = new ol.Map({
 ```
 
 We recommend to lookup parameters of your projection (like the validity extent)
-over at [epsg.io](http://epsg.io/).
+over at [epsg.io](https://epsg.io/).
 
 
 ## Why is my map centered on the gulf of guinea (or africa, the ocean, null-island)?
@@ -160,6 +158,22 @@ var swissCoord = ol.proj.transform([8.23, 46.86], 'EPSG:4326', 'EPSG:21781');
 
 ## Why is the order of a coordinate [lon,lat], and not [lat,lon]?
 
+Because of two different and incompatible conventions. Latitude and longitude
+are normally given in that order. Maps are 2D representations/projections
+of the earth's surface, with coordinates expressed in the `x,y` grid of the
+[Cartesian system](https://en.wikipedia.org/wiki/Cartesian_coordinate_system).
+As they are by convention drawn with west on the left and north at the top,
+this means that `x` represents longitude, and `y` latitude. As stated above,
+OpenLayers is designed to handle all projections, but the default view is in
+projected Cartesian coordinates. It would make no sense to have duplicate
+functions to handle coordinates in both the Cartesian `x,y` and `lat,lon`
+systems, so the degrees of latitude and longitude should be entered as though
+they were Cartesian, in other words, they are `lon,lat`.
+
+If you have difficulty remembering which way round it is, use the language code
+for English, `en`, as a mnemonic: East before North.
+
+#### A practical example
 So you want to center your map on a certain place on the earth and obviously you
 need to have its coordinates for this. Let's assume you want your map centered
 on Schladming, a beautiful place in Austria. Head over to the wikipedia
@@ -272,7 +286,7 @@ been populated with features), you should use an event listener function on the
 vector.getSource().on('change', function(evt){
   var source = evt.target;
   if (source.getState() === 'ready') {
-    var numFeatures = source.getFeatures().length; 
+    var numFeatures = source.getFeatures().length;
     console.log("Count after change: " + numFeatures);
   }
 });
@@ -299,36 +313,21 @@ map.render();
 map.renderSync();
 ```
 
+## Why are my features not found?
 
-## How do I create a custom build of OpenLayers?
+You are using `ol.Map#forEachFeatureAtPixel` or `ol.Map#hasFeatureAtPixel`, but
+it sometimes does not work for large icons or labels? The *hit detection* only
+checks features that are within a certain distance of the given position. For large
+icons, the actual geometry of a feature might be too far away and is not considered.
 
-Please refer to [this blog post](http://boundlessgeo.com/2014/10/openlayers-custom-builds-revisited/)
-which explains how to create a custom build of OpenLayers with just those parts
-included that you want.
+In this case, set the `renderBuffer` property of `ol.layer.Vector` (the default
+value is 100px):
 
+```javascript
+var vectorLayer = new ol.layer.Vector({
+  ...
+  renderBuffer: 200
+});
+```
 
-## Do I need to write my own code using Closure library?
-
-OpenLayers is built on top of the [Google Closure JavaScript
-library](https://developers.google.com/closure/library/), but this
-does not mean that you must use that library in your application code.
-
-OpenLayers should play well with all sorts of JavaScript libraries out there,
-and you are in no way forced to use a specific one. Choose one that looks
-right for you.
-
-
-## Do I need to compress my code with Closure compiler?
-
-No, you don't need to do compress your code with the [Google Closure
-compiler](https://developers.google.com/closure/compiler/).
-
-It may be a good choice though, because when your application code and the
-OpenLayers source code is compiled together using closure compiler, the
-resulting build will most probably be the smallest in terms of byte-size. For
-more details refer to [this tutorial](compile-application.md).
-
-If you don't want to use the closure compiler, or you can't, you are not at all
-forced to use it.
-
-
+The recommended value is the size of the largest symbol, line width or label.

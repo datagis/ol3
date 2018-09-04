@@ -1,6 +1,4 @@
-*.pyc
 /build/
-/examples/
-/node_modules/
-/dist/
 /coverage/
+/dist/
+node_modules/

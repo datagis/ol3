@@ -1,116 +1,129 @@
-goog.provide('ol.FeatureLoader');
-goog.provide('ol.featureloader');
-
-goog.require('goog.asserts');
-goog.require('goog.events');
-goog.require('goog.net.EventType');
-goog.require('goog.net.XhrIo');
-goog.require('goog.net.XhrIo.ResponseType');
-goog.require('ol.format.FormatType');
-goog.require('ol.xml');
-
-
 /**
- * @typedef {function(this:ol.source.Vector, ol.Extent, number,
- *                    ol.proj.Projection)}
+ * @module ol/featureloader
  */
-ol.FeatureLoader;
+import {VOID} from './functions.js';
+import FormatType from './format/FormatType.js';
 
 
 /**
- * @param {string} url Feature URL service.
- * @param {ol.format.Feature} format Feature format.
- * @param {function(this:ol.source.Vector, Array.<ol.Feature>)} success
- *     Function called with the loaded features. Called with the vector
+ * {@link module:ol/source/Vector} sources use a function of this type to
+ * load features.
+ *
+ * This function takes an {@link module:ol/extent~Extent} representing the area to be loaded,
+ * a `{number}` representing the resolution (map units per pixel) and an
+ * {@link module:ol/proj/Projection} for the projection  as
+ * arguments. `this` within the function is bound to the
+ * {@link module:ol/source/Vector} it's called from.
+ *
+ * The function is responsible for loading the features and adding them to the
+ * source.
+ * @typedef {function(this:module:ol/source/Vector, module:ol/extent~Extent, number,
+ *                    module:ol/proj/Projection)} FeatureLoader
+ * @api
+ */
+
+
+/**
+ * {@link module:ol/source/Vector} sources use a function of this type to
+ * get the url to load features from.
+ *
+ * This function takes an {@link module:ol/extent~Extent} representing the area
+ * to be loaded, a `{number}` representing the resolution (map units per pixel)
+ * and an {@link module:ol/proj/Projection} for the projection  as
+ * arguments and returns a `{string}` representing the URL.
+ * @typedef {function(module:ol/extent~Extent, number, module:ol/proj/Projection): string} FeatureUrlFunction
+ * @api
+ */
+
+
+/**
+ * @param {string|module:ol/featureloader~FeatureUrlFunction} url Feature URL service.
+ * @param {module:ol/format/Feature} format Feature format.
+ * @param {function(this:module:ol/VectorTile, Array<module:ol/Feature>, module:ol/proj/Projection, module:ol/extent~Extent)|function(this:module:ol/source/Vector, Array<module:ol/Feature>)} success
+ *     Function called with the loaded features and optionally with the data
+ *     projection. Called with the vector tile or source as `this`.
+ * @param {function(this:module:ol/VectorTile)|function(this:module:ol/source/Vector)} failure
+ *     Function called when loading failed. Called with the vector tile or
  *     source as `this`.
- * @return {ol.FeatureLoader} The feature loader.
+ * @return {module:ol/featureloader~FeatureLoader} The feature loader.
  */
-ol.featureloader.loadFeaturesXhr = function(url, format, success) {
+export function loadFeaturesXhr(url, format, success, failure) {
   return (
+    /**
+     * @param {module:ol/extent~Extent} extent Extent.
+     * @param {number} resolution Resolution.
+     * @param {module:ol/proj/Projection} projection Projection.
+     * @this {module:ol/source/Vector|module:ol/VectorTile}
+     */
+    function(extent, resolution, projection) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET',
+        typeof url === 'function' ? url(extent, resolution, projection) : url,
+        true);
+      if (format.getType() == FormatType.ARRAY_BUFFER) {
+        xhr.responseType = 'arraybuffer';
+      }
       /**
-       * @param {ol.Extent} extent Extent.
-       * @param {number} resolution Resolution.
-       * @param {ol.proj.Projection} projection Projection.
-       * @this {ol.source.Vector}
+       * @param {Event} event Event.
+       * @private
        */
-      function(extent, resolution, projection) {
-        var xhrIo = new goog.net.XhrIo();
-        var type = format.getType();
-        var responseType;
-        // FIXME maybe use ResponseType.DOCUMENT?
-        if (type == ol.format.FormatType.BINARY &&
-            ol.has.ARRAY_BUFFER) {
-          responseType = goog.net.XhrIo.ResponseType.ARRAY_BUFFER;
+      xhr.onload = function(event) {
+        // status will be 0 for file:// urls
+        if (!xhr.status || xhr.status >= 200 && xhr.status < 300) {
+          const type = format.getType();
+          /** @type {Document|Node|Object|string|undefined} */
+          let source;
+          if (type == FormatType.JSON || type == FormatType.TEXT) {
+            source = xhr.responseText;
+          } else if (type == FormatType.XML) {
+            source = xhr.responseXML;
+            if (!source) {
+              source = new DOMParser().parseFromString(xhr.responseText, 'application/xml');
+            }
+          } else if (type == FormatType.ARRAY_BUFFER) {
+            source = /** @type {ArrayBuffer} */ (xhr.response);
+          }
+          if (source) {
+            success.call(this, format.readFeatures(source,
+              {featureProjection: projection}),
+            format.readProjection(source), format.getLastExtent());
+          } else {
+            failure.call(this);
+          }
         } else {
-          responseType = goog.net.XhrIo.ResponseType.TEXT;
+          failure.call(this);
         }
-        xhrIo.setResponseType(responseType);
-        goog.events.listen(xhrIo, goog.net.EventType.COMPLETE,
-            /**
-             * @param {Event} event Event.
-             * @private
-             * @this {ol.source.Vector}
-             */
-            function(event) {
-              var xhrIo = event.target;
-              goog.asserts.assertInstanceof(xhrIo, goog.net.XhrIo,
-                  'event.target/xhrIo is an instance of goog.net.XhrIo');
-              if (xhrIo.isSuccess()) {
-                var type = format.getType();
-                /** @type {ArrayBuffer|Document|Node|Object|string|undefined} */
-                var source;
-                if (type == ol.format.FormatType.BINARY &&
-                    ol.has.ARRAY_BUFFER) {
-                  source = xhrIo.getResponse();
-                  goog.asserts.assertInstanceof(source, ArrayBuffer,
-                      'source is an instance of ArrayBuffer');
-                } else if (type == ol.format.FormatType.JSON) {
-                  source = xhrIo.getResponseText();
-                } else if (type == ol.format.FormatType.TEXT) {
-                  source = xhrIo.getResponseText();
-                } else if (type == ol.format.FormatType.XML) {
-                  if (!goog.userAgent.IE) {
-                    source = xhrIo.getResponseXml();
-                  }
-                  if (!goog.isDefAndNotNull(source)) {
-                    source = ol.xml.parse(xhrIo.getResponseText());
-                  }
-                } else {
-                  goog.asserts.fail('unexpected format type');
-                }
-                if (goog.isDefAndNotNull(source)) {
-                  var features = format.readFeatures(source,
-                      {featureProjection: projection});
-                  success.call(this, features);
-                } else {
-                  goog.asserts.fail('undefined or null source');
-                }
-              } else {
-                // FIXME
-              }
-              goog.dispose(xhrIo);
-            }, false, this);
-        xhrIo.send(url);
-      });
-};
+      }.bind(this);
+      /**
+       * @private
+       */
+      xhr.onerror = function() {
+        failure.call(this);
+      }.bind(this);
+      xhr.send();
+    }
+  );
+}
 
 
 /**
  * Create an XHR feature loader for a `url` and `format`. The feature loader
  * loads features (with XHR), parses the features, and adds them to the
  * vector source.
- * @param {string} url Feature URL service.
- * @param {ol.format.Feature} format Feature format.
- * @return {ol.FeatureLoader} The feature loader.
+ * @param {string|module:ol/featureloader~FeatureUrlFunction} url Feature URL service.
+ * @param {module:ol/format/Feature} format Feature format.
+ * @return {module:ol/featureloader~FeatureLoader} The feature loader.
  * @api
  */
-ol.featureloader.xhr = function(url, format) {
-  return ol.featureloader.loadFeaturesXhr(url, format,
-      /**
-       * @param {Array.<ol.Feature>} features The loaded features.
-       * @this {ol.source.Vector}
-       */
-      function(features) {
-        this.addFeatures(features);
-      });
-};
+export function xhr(url, format) {
+  return loadFeaturesXhr(url, format,
+    /**
+     * @param {Array<module:ol/Feature>} features The loaded features.
+     * @param {module:ol/proj/Projection} dataProjection Data
+     * projection.
+     * @this {module:ol/source/Vector}
+     */
+    function(features, dataProjection) {
+      this.addFeatures(features);
+    }, /* FIXME handle error */ VOID);
+}

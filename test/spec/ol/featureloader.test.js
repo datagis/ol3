@@ -1,30 +1,62 @@
-goog.provide('ol.test.featureloader');
+import {xhr} from '../../../src/ol/featureloader.js';
+import GeoJSON from '../../../src/ol/format/GeoJSON.js';
+import VectorSource from '../../../src/ol/source/Vector.js';
+
 
 describe('ol.featureloader', function() {
+
   describe('ol.featureloader.xhr', function() {
-    var loader;
-    var source;
+    let loader;
+    let source;
+    let url;
+    let format;
 
     beforeEach(function() {
-      var url = 'spec/ol/data/point.json';
-      var format = new ol.format.GeoJSON();
+      url = 'spec/ol/data/point.json';
+      format = new GeoJSON();
 
-      loader = ol.featureloader.xhr(url, format);
-      source = new ol.source.Vector();
+      source = new VectorSource();
     });
 
     it('adds features to the source', function(done) {
-      source.on(ol.source.VectorEventType.ADDFEATURE, function(e) {
+      loader = xhr(url, format);
+      source.on('addfeature', function(e) {
         expect(source.getFeatures().length).to.be.greaterThan(0);
         done();
       });
       loader.call(source, [], 1, 'EPSG:3857');
     });
 
-  });
-});
+    describe('when called with urlFunction', function() {
+      it('adds features to the source', function(done) {
+        url = function(extent, resolution, projection) {
+          return 'spec/ol/data/point.json';
+        };
+        loader = xhr(url, format);
 
-goog.require('ol.featureloader');
-goog.require('ol.format.GeoJSON');
-goog.require('ol.source.Vector');
-goog.require('ol.source.VectorEventType');
+        source.on('addfeature', function(e) {
+          expect(source.getFeatures().length).to.be.greaterThan(0);
+          done();
+        });
+        loader.call(source, [], 1, 'EPSG:3857');
+      });
+
+      it('sends the correct arguments to the urlFunction', function(done) {
+        const extent = [];
+        const resolution = 1;
+        const projection = 'EPSG:3857';
+        url = function(extent_, resolution_, projection_) {
+          expect(extent_).to.eql(extent);
+          expect(resolution_).to.eql(resolution);
+          expect(projection_).to.eql(projection);
+          done();
+          return 'spec/ol/data/point.json';
+        };
+        loader = xhr(url, format);
+        loader.call(source, [], 1, 'EPSG:3857');
+      });
+    });
+
+  });
+
+});
